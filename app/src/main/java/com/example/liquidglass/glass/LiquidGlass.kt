@@ -119,14 +119,26 @@ object LiquidGlass {
         return remember(quality) { LiquidGlassState(quality) }
     }
 
-    /** 纯 CPU 可分离 Box 模糊（三趟近似高斯），在低分辨率位图上执行。 */
+    /**
+     * 纯 CPU 可分离 Box 模糊（三趟近似高斯），在低分辨率位图上执行。
+     *
+     * **注意**：Android 13+ 的 [androidx.compose.ui.graphics.layer.GraphicsLayer.toImageBitmap]
+     * 返回的是 `Config#HARDWARE` 位图，其像素数据位于 GPU 显存，
+     * 调用 [Bitmap.getPixels] 会抛
+     * `IllegalStateException: pixel access is not supported on Config#HARDWARE bitmaps`。
+     * 因此这里先把源位图复制成软件位图（ARGB_8888）再做像素级运算。
+     *
+     * @return 模糊结果；若源位图不可读则原样返回，调用方需容忍未模糊的背景
+     */
     internal fun blurCpu(src: Bitmap, radius: Float): Bitmap {
         if (radius <= 0f) return src
-        val w = src.width
-        val h = src.height
-        if (w <= 2 || h <= 2) return src
+        // HARDWARE 位图（以及 RGB_565 等非 8888 格式）先归一化为可读的软件位图
+        val readable = src.toReadableArgb8888() ?: return src
+        val w = readable.width
+        val h = readable.height
+        if (w <= 2 || h <= 2) return readable
         val pixels = IntArray(w * h)
-        src.getPixels(pixels, 0, w, 0, 0, w, h)
+        readable.getPixels(pixels, 0, w, 0, 0, w, h)
         val tmp = IntArray(pixels.size)
         val r = radius.roundToInt().coerceIn(1, 12)
         repeat(3) {
@@ -134,6 +146,33 @@ object LiquidGlass {
             boxV(tmp, pixels, w, h, r)
         }
         return Bitmap.createBitmap(pixels, w, h, Bitmap.Config.ARGB_8888)
+    }
+
+    /**
+     * 把任意位图转成可进行像素读写的 [Bitmap.Config.ARGB_8888] 软件位图。
+     *
+     * [androidx.compose.ui.graphics.layer.GraphicsLayer.toImageBitmap] 在
+     * Android 13+ 上返回 `Config#HARDWARE` 位图，其像素驻留显存、不可读取；
+     * 这里用一次 `copy(ARGB_8888, false)` 把它落到系统内存。
+     *
+     * @return 可读位图；转换失败返回 `null`，此时调用方应跳过 CPU 处理，
+     *   而不是让异常冒泡导致宿主应用闪退
+     */
+    internal fun Bitmap.toReadableArgb8888(): Bitmap? {
+        // HARDWARE 配置的位图像素驻留显存，不可通过 getPixels 读取。
+        // 该配置由 API 26 引入，且实际只会在 API 29+ 上由
+        // GraphicsLayer.toImageBitmap 产生；低版本不存在，故带版本判断，
+        // 避免在 API 21-25 上触碰 Bitmap.Config.HARDWARE 常量。
+        val isHardwareConfig =
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && config == Bitmap.Config.HARDWARE
+        if (config == Bitmap.Config.ARGB_8888 && !isHardwareConfig) return this
+        return runCatching {
+            // copy 到 ARGB_8888 会隐式完成 HARDWARE -> 软件位图的转换
+            copy(Bitmap.Config.ARGB_8888, false)
+        }.getOrElse { t ->
+            Log.w(LG_TAG, "bitmap is not pixel-readable, skipping CPU pass", t)
+            null
+        }
     }
 
     private fun boxH(src: IntArray, dst: IntArray, w: Int, h: Int, r: Int) {
@@ -259,20 +298,31 @@ fun Modifier.liquidGlassSource(
 
                 // toImageBitmap 是挂起函数，提交到协程读取像素
                 scope.launch {
-                    val bitmap = runCatching { layer.toImageBitmap() }.getOrNull()
-                    if (bitmap == null) {
+                    val captured = runCatching { layer.toImageBitmap() }.getOrNull()
+                    if (captured == null) {
                         Log.w(LG_TAG, "background capture failed; refraction disabled")
                         state.onBackgroundCaptured(null)
                         return@launch
                     }
-                    if (submitted[0] === bitmap) return@launch
-                    submitted[0] = bitmap
-                    state.onBackgroundCaptured(bitmap)
+                    if (submitted[0] === captured) return@launch
+                    submitted[0] = captured
+                    state.onBackgroundCaptured(captured)
 
-                    // 异步 CPU 模糊，避免阻塞绘制
+                    // 异步 CPU 模糊，避免阻塞绘制。
+                    // 整段包在 runCatching 内：捕获到的位图可能是 Config#HARDWARE
+                    // （Android 13+ 的 GraphicsLayer 行为），像素不可读，
+                    // 此时保留未模糊的背景继续渲染，绝不让异常冒泡崩溃。
                     val start = System.nanoTime()
                     val blurred = withContext(Dispatchers.Default) {
-                        LiquidGlass.blurCpu(bitmap.asAndroidBitmap(), state.quality.blurRadius)
+                        runCatching {
+                            LiquidGlass.blurCpu(
+                                captured.asAndroidBitmap(),
+                                state.quality.blurRadius,
+                            )
+                        }.getOrElse { t ->
+                            Log.w(LG_TAG, "CPU blur failed; using unblurred background", t)
+                            captured.asAndroidBitmap()
+                        }
                     }
                     state.blurredBackground = blurred.asImageBitmap()
                     state.lastRenderCostMs = (System.nanoTime() - start) / 1_000_000f
