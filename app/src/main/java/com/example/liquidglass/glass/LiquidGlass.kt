@@ -312,14 +312,25 @@ internal class AgslGlassLayer {
      *
      * 用 8×8 的小位图跑一次空绘制，触发 SkSL 编译与管线预热。
      */
-    fun warmUp() {
-        runCatching {
-            val bmp = Bitmap.createBitmap(8, 8, Bitmap.Config.ARGB_8888)
-            val canvas = android.graphics.Canvas(bmp)
-            val paint = android.graphics.Paint().apply { this.shader = shader }
-            canvas.drawRect(0f, 0f, 8f, 8f, paint)
-            bmp.recycle()
-        }
+    /**
+     * 预热着色器，避免首帧编译卡顿。
+     *
+     * 用 8×8 的小位图跑一次空绘制，触发 SkSL 编译与管线预热。
+     *
+     * @return 预热是否成功。SkSL 编译失败（例如厂商驱动不支持某些内建函数）
+     *   会在这里被捕获并返回 `false`，调用方据此回退到不依赖 AGSL 的
+     *   [GlassQuality.Minimal] 渲染路径，而不是在后续 [updateEffect] 中崩溃。
+     */
+    fun warmUp(): Boolean = runCatching {
+        val bmp = Bitmap.createBitmap(8, 8, Bitmap.Config.ARGB_8888)
+        val canvas = android.graphics.Canvas(bmp)
+        val paint = android.graphics.Paint().apply { this.shader = shader }
+        canvas.drawRect(0f, 0f, 8f, 8f, paint)
+        bmp.recycle()
+        true
+    }.getOrElse { t ->
+        Log.w(LG_TAG, "AGSL shader warm-up failed; falling back to CPU path", t)
+        false
     }
 
     /**
@@ -329,17 +340,23 @@ internal class AgslGlassLayer {
      * @param height 玻璃容器高（px）
      * @param state 玻璃状态
      */
-    fun updateEffect(width: Int, height: Int, state: LiquidGlassState): android.graphics.RenderEffect {
+    fun updateEffect(width: Int, height: Int, state: LiquidGlassState): android.graphics.RenderEffect? {
         val n = state.normalizedTouch()
-        shader.setFloatUniform("resolution", width.toFloat(), height.toFloat())
-        shader.setFloatUniform("mouse", n.x * width, n.y * height)
-        shader.setFloatUniform("touchStrength", state.touchStrength)
-        shader.setFloatUniform("refractiveIndex", 1.5f)
-        shader.setFloatUniform("dispersion", state.quality.dispersion)
-        shader.setFloatUniform("edgeRadius", state.cornerRadiusPx)
-        shader.setFloatUniform("thickness", state.thicknessPx)
-        shader.setColorUniform("tint", state.tint.toArgbInt())
-        return android.graphics.RenderEffect.createRuntimeShaderEffect(shader, "image")
+        return runCatching {
+            shader.setFloatUniform("resolution", width.toFloat(), height.toFloat())
+            shader.setFloatUniform("mouse", n.x * width, n.y * height)
+            shader.setFloatUniform("touchStrength", state.touchStrength)
+            shader.setFloatUniform("refractiveIndex", 1.5f)
+            shader.setFloatUniform("dispersion", state.quality.dispersion)
+            shader.setFloatUniform("edgeRadius", state.cornerRadiusPx)
+            shader.setFloatUniform("thickness", state.thicknessPx)
+            shader.setColorUniform("tint", state.tint.toArgbInt())
+            android.graphics.RenderEffect.createRuntimeShaderEffect(shader, "image")
+        }.getOrElse { t ->
+            // 例如某厂商驱动不支持某个内建函数：不崩溃，退到无折射路径
+            Log.w(LG_TAG, "AGSL uniform update failed; skipping refraction this frame", t)
+            null
+        }
     }
 }
 
@@ -406,11 +423,24 @@ private fun Modifier.liquidGlassInternal(
 
     if (state.quality == GlassQuality.Full && Build.VERSION.SDK_INT >= 33) {
         if (agslLayer[0] == null) {
-            agslLayer[0] = AgslGlassLayer().also { it.warmUp() }
-            state.shaderWarmedUp = true
+            val layer = AgslGlassLayer()
+            // warmUp 返回真实结果：某些厂商驱动无法编译 AGSL，
+            // 此时不能把 shaderWarmedUp 误标为 true，否则后续每帧
+            // updateEffect 都会抛异常导致闪退。这里直接降级到
+            // Minimal（CPU 模糊）路径，保证内容仍然可见。
+            val ok = layer.warmUp()
+            state.shaderWarmedUp = ok
+            if (ok) {
+                agslLayer[0] = layer
+            } else {
+                state.quality = GlassQuality.Minimal
+                fallbackRenderer[0] = LiquidGlassFallback.create(GlassQuality.Minimal)
+            }
         }
     } else if (state.quality == GlassQuality.Medium && Build.VERSION.SDK_INT >= 31) {
-        effectLayer[0] = RenderEffectGlassLayer()
+        if (effectLayer[0] == null) {
+            effectLayer[0] = RenderEffectGlassLayer()
+        }
     } else {
         fallbackRenderer[0] = LiquidGlassFallback.create(state.quality)
     }
@@ -467,17 +497,43 @@ private fun Modifier.liquidGlassInternal(
                 val offX = state.positionInWindow.x - state.sourcePosition.x
                 val offY = state.positionInWindow.y - state.sourcePosition.y
 
+                // 图层实例由组合阶段创建，但在极端时序下（首帧绘制早于组合赋值、
+                // 质量分级被外部改写、驱动不支持 AGSL 等）可能仍为 null，
+                // 或 updateEffect 返回 null（uniform 设置失败）。
+                // 此处做二次校验并回退到 Fallback 渲染，避免绘制线程抛异常闪退。
+                val agsl = agslLayer[0]
+                val effect = effectLayer[0]
+                val agslEffect = if (
+                    q == GlassQuality.Full && bg != null &&
+                    Build.VERSION.SDK_INT >= 33 && agsl != null
+                ) {
+                    agsl.updateEffect(iw, ih, state)
+                } else {
+                    null
+                }
+                val renderEffect = if (
+                    agslEffect == null &&
+                    q == GlassQuality.Medium && bg != null &&
+                    Build.VERSION.SDK_INT >= 31 && effect != null
+                ) {
+                    runCatching {
+                        effect.blurEffect(with(density) { q.blurRadius.dp.toPx() })
+                    }.getOrNull()
+                } else {
+                    null
+                }
+
                 when {
                     // ---- API 33+：AGSL 完整液态玻璃 ----
-                    q == GlassQuality.Full && bg != null && Build.VERSION.SDK_INT >= 33 -> {
-                        glassLayer.renderEffect =
-                            agslLayer[0]!!.updateEffect(iw, ih, state).asComposeRenderEffect()
+                    agslEffect != null && bg != null -> {
+                        val src = bg
+                        glassLayer.renderEffect = agslEffect.asComposeRenderEffect()
                         glassLayer.record(density, layoutDirection, IntSize(iw, ih)) {
                             clipPath(path) {
                                 drawImage(
-                                    image = bg,
+                                    image = src,
                                     srcOffset = IntOffset.Zero,
-                                    srcSize = IntSize(bg.width.coerceAtLeast(1), bg.height.coerceAtLeast(1)),
+                                    srcSize = IntSize(src.width.coerceAtLeast(1), src.height.coerceAtLeast(1)),
                                     dstOffset = IntOffset(offX, offY),
                                     dstSize = IntSize(iw, ih),
                                 )
@@ -487,16 +543,16 @@ private fun Modifier.liquidGlassInternal(
                     }
 
                     // ---- API 31-32：RenderEffect 硬件模糊 ----
-                    q == GlassQuality.Medium && bg != null && Build.VERSION.SDK_INT >= 31 -> {
-                        val blurPx = with(density) { (q.blurRadius.dp).toPx() }
-                        glassLayer.renderEffect =
-                            effectLayer[0]!!.blurEffect(blurPx).asComposeRenderEffect()
+                    // renderEffect 仅在 bg != null 时被赋值，故此处 bg 必然非空
+                    renderEffect != null && bg != null -> {
+                        val src = bg
+                        glassLayer.renderEffect = renderEffect.asComposeRenderEffect()
                         glassLayer.record(density, layoutDirection, IntSize(iw, ih)) {
                             clipPath(path) {
                                 drawImage(
-                                    image = bg,
+                                    image = src,
                                     srcOffset = IntOffset.Zero,
-                                    srcSize = IntSize(bg.width.coerceAtLeast(1), bg.height.coerceAtLeast(1)),
+                                    srcSize = IntSize(src.width.coerceAtLeast(1), src.height.coerceAtLeast(1)),
                                     dstOffset = IntOffset(offX, offY),
                                     dstSize = IntSize(iw, ih),
                                 )
@@ -509,11 +565,19 @@ private fun Modifier.liquidGlassInternal(
                         }
                     }
 
-                    // ---- API 24-30：CPU 模糊 + Canvas 合成 ----
-                    q == GlassQuality.Minimal -> {
+                    // ---- API 24-30，或 Full / Medium 档硬件路径不可用时的回退 ----
+                    q == GlassQuality.Minimal || q == GlassQuality.Full || q == GlassQuality.Medium -> {
                         currentBackground = bg
                         backgroundDstOffset = IntOffset(offX, offY)
-                        with(fallbackRenderer[0] ?: LiquidGlassFallback.GradientRenderer(q)) {
+                        // 回退渲染器若尚未创建（例如 AGSL 预热失败刚切到本分支），
+                        // 这里按当前档位临时构造一个，画完即弃，不缓存
+                        val fb = fallbackRenderer[0]
+                            ?: if (bg == null) {
+                                LiquidGlassFallback.GradientRenderer(GlassQuality.Fallback)
+                            } else {
+                                LiquidGlassFallback.create(q)
+                            }
+                        with(fb) {
                             drawGlassBase(radiusPx, q.alpha, touch, ts)
                             drawGlassRim(radiusPx, touch, ts)
                         }

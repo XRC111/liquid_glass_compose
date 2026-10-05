@@ -97,25 +97,30 @@ internal fun LiquidGlassApp(
         state.quality = forcedQuality
     }
 
-    var page by rememberSaveable { mutableStateOf(initialPage) }
+    // 页面路由：rememberSaveable 的默认 Saver 无法保存自定义枚举
+    // （枚举不实现 Parcelable / Serializable），会抛
+    // "cannot be saved using the current SaveableStateRegistry"。
+    // 因此这里以枚举名（String）作为存储载体，读写时双向映射。
+    var pageName by rememberSaveable { mutableStateOf(initialPage.name) }
+    val page = DemoPage.entries.firstOrNull { it.name == pageName } ?: DemoPage.Home
 
     val content = @Composable {
         when (page) {
             DemoPage.Home -> HomePage(
                 state = state,
-                onNavigateToCards = { page = DemoPage.Cards },
+                onNavigateToCards = { pageName = DemoPage.Cards.name },
                 animate = animate,
             )
 
             DemoPage.TabBar -> TabBarDemo(
                 state = state,
-                onBack = { page = DemoPage.Home },
+                onBack = { pageName = DemoPage.Home.name },
                 animate = animate,
             )
 
             DemoPage.Cards -> CardDemo(
                 state = state,
-                onBack = { page = DemoPage.Home },
+                onBack = { pageName = DemoPage.Home.name },
                 animate = animate,
             )
         }

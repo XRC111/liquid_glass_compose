@@ -3,6 +3,7 @@ package com.example.liquidglass.glass
 import android.graphics.PointF
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.geometry.Offset
@@ -66,7 +67,7 @@ class LiquidGlassState internal constructor(
         internal set
 
     /** 屏幕密度，用于 px/dp 换算。 */
-    var sourceDensity: Float by mutableStateOf(3f)
+    var sourceDensity: Float by mutableFloatStateOf(3f)
         internal set
 
     /** 当前触摸点（容器局部坐标，px）。无触摸时为 null。 */
@@ -74,7 +75,7 @@ class LiquidGlassState internal constructor(
         internal set
 
     /** 当前触摸强度（0f~1f），用于动态光照衰减。 */
-    var touchStrength: Float by mutableStateOf(0f)
+    var touchStrength: Float by mutableFloatStateOf(0f)
         internal set
 
     /** 捕获的原始背景位图（低分辨率），由 [liquidGlassSource] 写入。 */
@@ -110,7 +111,7 @@ class LiquidGlassState internal constructor(
         internal set
 
     /** 当前效果可用的模糊半径（px），已按降采样折算。 */
-    var lastRenderCostMs: Float by mutableStateOf(0f)
+    var lastRenderCostMs: Float by mutableFloatStateOf(0f)
         internal set
 
     /** 是否已预热着色器，避免首帧卡顿。 */
