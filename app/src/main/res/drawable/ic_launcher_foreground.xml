@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  液态玻璃图标：中心透镜 + 边缘高光 + 左上反光点。
+  刻意不使用 <gradient>（aapt:attr 的 startX/endX/offset 仅 API 24+），
+  以保证 minSdk 21 可用；改用多个半透明色块叠加模拟玻璃体积感。
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- 玻璃主体：浅色 -->
+    <path
+        android:pathData="M54,30 C68,30 78,40 78,54 C78,68 68,78 54,78 C40,78 30,68 30,54 C30,40 40,30 54,30 Z"
+        android:fillColor="#FFB8D8FF"
+        android:fillAlpha="0.55" />
+
+    <!-- 玻璃主体：中部稍深，模拟厚度 -->
+    <path
+        android:pathData="M54,38 C63,38 70,45 70,54 C70,63 63,70 54,70 C45,70 38,63 38,54 C38,45 45,38 54,38 Z"
+        android:fillColor="#FF6E9FDB"
+        android:fillAlpha="0.40" />
+
+    <!-- 边缘高光描边 -->
+    <path
+        android:pathData="M54,30 C68,30 78,40 78,54 C78,68 68,78 54,78 C40,78 30,68 30,54 C30,40 40,30 54,30 Z"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="2.5"
+        android:strokeAlpha="0.85" />
+
+    <!-- 左上反光点 -->
+    <path
+        android:pathData="M44,42 C47,38 52,37 55,39 C57,41 55,44 52,45 C48,46 44,45 44,42 Z"
+        android:fillColor="#FFFFFFFF"
+        android:fillAlpha="0.90" />
+</vector>

@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      纯 Compose 应用，使用平台 Material 主题（API 21+ 可用），
+      不依赖 AppCompat，从而把 minSdk 压到 21。
+    -->
+    <style name="Theme.LiquidGlass" parent="@android:style/Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/glass_window_background</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowDrawsSystemBarBackgrounds">true</item>
+    </style>
+</resources>
