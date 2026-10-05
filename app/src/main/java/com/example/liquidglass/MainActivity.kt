@@ -19,6 +19,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import com.example.liquidglass.glass.GlassQuality
 import com.example.liquidglass.glass.LiquidGlass
 import com.example.liquidglass.pages.CardDemo
 import com.example.liquidglass.pages.HomePage
@@ -35,46 +36,87 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+
+        // 基准测试 / 调试入口：通过 Intent extra 定向到指定质量分级与页面，
+        // 使 Macrobenchmark 能在一次运行内采集四档数据的对比。
+        val forcedQuality = intent.getStringExtra(EXTRA_QUALITY)
+            ?.let { name -> GlassQuality.entries.firstOrNull { it.name.equals(name, true) } }
+        val initialPage = intent.getStringExtra(EXTRA_PAGE)
+            ?.let { name -> DemoPage.entries.firstOrNull { it.name.equals(name, true) } }
+            ?: DemoPage.Home
+        val animate = intent.getBooleanExtra(EXTRA_ANIMATE, false)
+
         setContent {
             MaterialTheme(colorScheme = darkColorScheme()) {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = androidx.compose.ui.graphics.Color(0xFF0B1020),
                 ) {
-                    LiquidGlassApp()
+                    LiquidGlassApp(
+                        forcedQuality = forcedQuality,
+                        initialPage = initialPage,
+                        animate = animate,
+                    )
                 }
             }
         }
     }
+
+    companion object {
+        /** 强制质量分级，取值 `Full` / `Medium` / `Minimal` / `Fallback`。 */
+        const val EXTRA_QUALITY = "com.example.liquidglass.QUALITY"
+
+        /** 启动时直接进入的页面，取值 `Home` / `TabBar` / `Cards`。 */
+        const val EXTRA_PAGE = "com.example.liquidglass.PAGE"
+
+        /** 是否启用背景动画（基准测试建议设为 `false` 以排除动画噪声）。 */
+        const val EXTRA_ANIMATE = "com.example.liquidglass.ANIMATE"
+    }
 }
 
 /** 演示页面路由。 */
-private enum class DemoPage { Home, TabBar, Cards }
+internal enum class DemoPage { Home, TabBar, Cards }
 
 /**
  * 演示应用主体：三个页面之间切换。
+ *
+ * @param forcedQuality 非空时强制覆盖自动决策的质量分级，用于验证降级链路
+ * @param initialPage 启动时展示的页面
+ * @param animate 是否启用背景动画；基准测试关闭以排除噪声
  */
 @Composable
-fun LiquidGlassApp() {
+internal fun LiquidGlassApp(
+    forcedQuality: GlassQuality? = null,
+    initialPage: DemoPage = DemoPage.Home,
+    animate: Boolean = true,
+) {
     // 质量分级在 App 级别决策一次，三个页面共享
     val state = LiquidGlass.rememberState()
-    var page by rememberSaveable { mutableStateOf(DemoPage.Home) }
+
+    if (forcedQuality != null) {
+        state.quality = forcedQuality
+    }
+
+    var page by rememberSaveable { mutableStateOf(initialPage) }
 
     val content = @Composable {
         when (page) {
             DemoPage.Home -> HomePage(
                 state = state,
                 onNavigateToCards = { page = DemoPage.Cards },
+                animate = animate,
             )
 
             DemoPage.TabBar -> TabBarDemo(
                 state = state,
                 onBack = { page = DemoPage.Home },
+                animate = animate,
             )
 
             DemoPage.Cards -> CardDemo(
                 state = state,
                 onBack = { page = DemoPage.Home },
+                animate = animate,
             )
         }
     }

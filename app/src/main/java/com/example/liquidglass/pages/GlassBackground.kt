@@ -26,11 +26,14 @@ import kotlin.math.sin
  * 因此这里叠加了移动的色斑与细网格，而不是纯色。
  *
  * @param modifier 布局修饰符
+ * @param animate 是否让光斑缓慢流动。基准测试建议设为 `false`，
+ *   以排除背景动画本身的重绘开销对帧率统计的干扰
  * @param content 在背景之上绘制的玻璃层
  */
 @Composable
 fun GlassDemoBackground(
     modifier: Modifier = Modifier,
+    animate: Boolean = true,
     content: @Composable BoxScope.() -> Unit,
 ) {
     Box(
@@ -46,17 +49,23 @@ fun GlassDemoBackground(
                 ),
             ),
     ) {
-        // 流动的彩色光斑：为折射提供高频细节
-        val transition = rememberInfiniteTransition(label = "bg")
-        val phase by transition.animateFloat(
-            initialValue = 0f,
-            targetValue = (2 * Math.PI).toFloat(),
-            animationSpec = infiniteRepeatable(
-                animation = tween(durationMillis = 9000),
-                repeatMode = RepeatMode.Restart,
-            ),
-            label = "phase",
-        )
+        // 流动的彩色光斑：为折射提供高频细节。
+        // 关闭动画时固定相位，避免背景自身重绘干扰性能测量。
+        val phase = if (animate) {
+            val transition = rememberInfiniteTransition(label = "bg")
+            val animated by transition.animateFloat(
+                initialValue = 0f,
+                targetValue = (2 * Math.PI).toFloat(),
+                animationSpec = infiniteRepeatable(
+                    animation = tween(durationMillis = 9000),
+                    repeatMode = RepeatMode.Restart,
+                ),
+                label = "phase",
+            )
+            animated
+        } else {
+            0f
+        }
 
         Canvas(Modifier.fillMaxSize()) {
             val w = size.width

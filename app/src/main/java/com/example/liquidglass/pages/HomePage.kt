@@ -49,9 +49,13 @@ import com.example.liquidglass.glass.liquidGlassSource
 fun HomePage(
     state: LiquidGlassState,
     onNavigateToCards: () -> Unit,
+    animate: Boolean = true,
 ) {
     Box(Modifier.fillMaxSize()) {
-        GlassDemoBackground(Modifier.liquidGlassSource(state, enabled = true)) {
+        GlassDemoBackground(
+            modifier = Modifier.liquidGlassSource(state, enabled = true),
+            animate = animate,
+        ) {
             Column(
                 modifier = Modifier
                     .fillMaxSize()

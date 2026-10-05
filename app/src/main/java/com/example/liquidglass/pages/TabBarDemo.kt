@@ -47,12 +47,16 @@ import com.example.liquidglass.glass.liquidGlassSource
 fun TabBarDemo(
     state: LiquidGlassState,
     onBack: () -> Unit,
+    animate: Boolean = true,
 ) {
     var selected by remember { mutableIntStateOf(0) }
     val tabs = listOf("首页", "卡片", "说明")
 
     Box(Modifier.fillMaxSize()) {
-        GlassDemoBackground(Modifier.liquidGlassSource(state, enabled = true)) {
+        GlassDemoBackground(
+            modifier = Modifier.liquidGlassSource(state, enabled = true),
+            animate = animate,
+        ) {
             Column(
                 modifier = Modifier
                     .fillMaxSize()

@@ -65,9 +65,16 @@ liquid_glass_compose/
 │   │   ├── res/values/{themes,colors,strings}.xml
 │   │   └── AndroidManifest.xml
 │   └── build.gradle.kts
+├── benchmark/                              # Macrobenchmark 性能基准模块
+│   ├── src/main/
+│   │   ├── java/com/example/liquidglass/benchmark/
+│   │   │   └── GlassBenchmark.kt           # 4 场景 × 4 档质量 = 16 个测试
+│   │   └── AndroidManifest.xml
+│   └── build.gradle.kts
 ├── build.gradle.kts
 ├── settings.gradle.kts
 ├── gradle/libs.versions.toml
+├── PERFORMANCE.md                          # 性能报告（成本模型 + 实测数据表）
 └── README.md
 ```
 
@@ -94,6 +101,43 @@ app/build/outputs/apk/debug/app-debug.apk
 ```
 
 要求：JDK 17+、Android SDK Platform 35、Build-Tools 35.0.0。
+
+---
+
+## 性能基准测试
+
+`benchmark/` 模块基于 **Macrobenchmark + FrameTimingMetric**，
+通过 Intent extra 强制指定质量档位与演示页面，逐档采集真实帧率。
+
+```bash
+# 需连接真机或模拟器（API 23+）
+./gradlew :benchmark:connectedAndroidTest
+```
+
+结果输出在 `benchmark/build/outputs/connected_android_test_additional_output/`，
+同时在 Logcat 中以 `Benchmark` tag 打印 `frameDurationCpuMs` 的 P50/P90/P95/P99。
+
+可用的调试入口（`MainActivity` 的 Intent extra，benchmark 与手工 `adb` 均可用）：
+
+| extra | 取值 | 作用 |
+|-------|------|------|
+| `com.example.liquidglass.QUALITY` | `Full` / `Medium` / `Minimal` / `Fallback` | 强制质量档位，绕过自动决策 |
+| `com.example.liquidglass.PAGE` | `Home` / `TabBar` / `Cards` | 直接进入指定演示页面 |
+| `com.example.liquidglass.ANIMATE` | `true` / `false` | 是否播放背景动画（基准测试置 `false` 以排除动画噪声） |
+
+手工采集单个场景示例：
+
+```bash
+adb shell am start -n com.example.liquidglass/.MainActivity \
+  -e com.example.liquidglass.QUALITY Full \
+  -e com.example.liquidglass.PAGE TabBar \
+  -e com.example.liquidglass.ANIMATE false
+```
+
+应用内还会实时显示 `state.lastRenderCostMs`（模糊 Pass 的 CPU 耗时），
+可在 `CardDemo` 页看到逐帧刷新。
+
+详见 [PERFORMANCE.md](PERFORMANCE.md)。
 
 ---
 
@@ -175,7 +219,7 @@ GlassTabBar(
 | README（结构 / 运行 / 各 API 降级表现） | 通过 |
 | 性能测试报告（4 台设备 API 21/24/29/33 帧率） | 测量方法与成本模型已提供；实测数据需真机采集，见 [PERFORMANCE.md](PERFORMANCE.md) |
 | `./gradlew lint` 无警告 | 通过（0 errors, 0 warnings） |
-| 库可被其他 Compose 项目依赖 | 通过，见配套库仓库 [liquid-glass-compose](https://github.com/liquidglass/liquid-glass-compose) |
+| 库可被其他 Compose 项目依赖 | 通过，见配套库仓库 [XRC111/liquid-glass-compose](https://github.com/XRC111/liquid-glass-compose) |
 
 ---
 

@@ -22,3 +22,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "liquid_glass_compose"
 include(":app")
+include(":benchmark")

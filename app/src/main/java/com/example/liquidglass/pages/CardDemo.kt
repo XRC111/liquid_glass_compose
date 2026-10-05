@@ -43,9 +43,13 @@ import com.example.liquidglass.glass.liquidGlassSource
 fun CardDemo(
     state: LiquidGlassState,
     onBack: () -> Unit,
+    animate: Boolean = true,
 ) {
     Box(Modifier.fillMaxSize()) {
-        GlassDemoBackground(Modifier.liquidGlassSource(state, enabled = true)) {
+        GlassDemoBackground(
+            modifier = Modifier.liquidGlassSource(state, enabled = true),
+            animate = animate,
+        ) {
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(

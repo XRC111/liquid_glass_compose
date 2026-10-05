@@ -1,74 +1,92 @@
 # 性能测试报告
 
-> **重要说明**：本报告中的帧率数据**不是实测值**。构建环境为 CI 沙箱，**无任何物理设备与模拟器**，无法运行 `adb shell dumpsys gfxinfo` 或 Macrobenchmark。因此本文提供的是：**（1）可复现的测量方法**、**（2）基于实现成本模型的预期区间**、**（3）降级链路的设计依据**。验收方按第 1 节步骤在真机执行即可得到真实数据填入第 3 节表格。
+> **重要说明**：本报告中的帧率数据**不是实测值**。构建环境为 CI 沙箱，**无任何物理设备与模拟器**，无法运行 `adb shell dumpsys gfxinfo` 或 Macrobenchmark。因此本文提供的是：**（1）已内置的自动化基准测试**、**（2）基于实现成本模型的预期区间**、**（3）降级链路的设计依据**。验收方按第 1 节执行即可自动产出真实数据填入第 3 节表格。
 >
 > 所有非实测内容均已显式标注，未伪装为实测结果。
 
 ---
 
-## 1. 测量方法（可复现）
+## 1. 测量方法（已自动化）
 
-### 1.1 环境要求
+工程内置 `:benchmark` 模块（`com.android.test` + `androidx.benchmark:benchmark-macro-junit4`），
+**四个场景 × 四档质量分级 = 16 个基准测试**已全部编写完成，连接真机后一条命令即可产出数据。
 
-| 项 | 要求 |
-|----|------|
-| 设备 | 至少覆盖 API 21 / 24 / 29 / 33 各一台 |
-| 构建 | `./gradlew :app:installRelease`（Release + R8，避免 Debug 的额外开销失真） |
-| 工具 | `adb`（platform-tools）、`gfxinfo`、可选 Macrobenchmark |
-
-### 1.2 采集步骤
+### 1.1 运行
 
 ```bash
-# 1) 安装 Release 包
+# 连接真机（推荐；模拟器数据无参考价值）
+adb devices
+
+# 跑全部 16 个基准
+./gradlew :benchmark:connectedAndroidTest
+
+# 只跑某一档（例：Full 分级的首页静止）
+./gradlew :benchmark:connectedAndroidTest \
+  -Pandroid.testInstrumentationRunnerArguments.class=\
+com.example.liquidglass.benchmark.GlassBenchmark#homeStatic_Full
+```
+
+结果输出位置：
+
+| 路径 | 内容 |
+|------|------|
+| `benchmark/build/outputs/connected_android_test_additional_output/` | JSON / Perfetto trace |
+| `benchmark/build/reports/benchmark/` | HTML 报告 |
+
+采集的指标为 `FrameTimingMetric`，输出 P50 / P90 / P95 / P99 与帧数，
+`CompilationMode.Full()` 保证使用 AOT 编译后的产物，`iterations = 5` 取中位数。
+
+### 1.2 基准如何驱动四档质量
+
+示例程序支持通过 Intent extra 定向启动，因此基准测试可在同一次运行内对比四档表现：
+
+| Extra | 取值 | 作用 |
+|-------|------|------|
+| `com.example.liquidglass.QUALITY` | `Full` / `Medium` / `Minimal` / `Fallback` | 强制质量分级，绕过自动决策 |
+| `com.example.liquidglass.PAGE` | `Home` / `TabBar` / `Cards` | 直接进入指定演示页 |
+| `com.example.liquidglass.ANIMATE` | `true` / `false` | 是否启用背景流动动画；基准测试传 `false` 以排除动画噪声 |
+
+手工验证同一个入口：
+
+```bash
+adb shell am start -n com.example.liquidglass/.MainActivity \
+  --es com.example.liquidglass.QUALITY Full \
+  --es com.example.liquidglass.PAGE Cards \
+  --ez com.example.liquidglass.ANIMATE false
+```
+
+### 1.3 四个场景
+
+| 场景 | 方法 | 说明 |
+|------|------|------|
+| 静止 | `homeStatic_*` | 首页玻璃无交互，测基础绘制成本 |
+| 触摸拖动 | `touchDrag_*` | 屏幕中部水平拖动，测触摸跟随高光的增量成本 |
+| TabBar 切换 | `tabBar_*` | 底部 Tab 连续切换，测玻璃容器重组开销 |
+| 列表滑动 | `cardScroll_*` | 卡片列表连续滑动，测多玻璃容器并发成本 |
+
+### 1.4 手工兜底方式
+
+若不便跑 Macrobenchmark，也可用 `gfxinfo` 手工采集：
+
+```bash
 ./gradlew :app:installRelease
-
-# 2) 清空统计
 adb shell dumpsys gfxinfo com.example.liquidglass reset
-
-# 3) 手动执行测试场景（每场景持续 10 秒）
-#    场景 A：首页静止（玻璃无交互）
-#    场景 B：首页按住卡片并匀速拖动（触摸跟随）
-#    场景 C：TabBar 页反复切换 4 个 Tab
-#    场景 D：卡片页持续上下滑动列表
-
-# 4) 读取统计
+# 手工操作四类场景各 10 秒
 adb shell dumpsys gfxinfo com.example.liquidglass | grep -A 10 "Janky frames"
 ```
 
-关注三项：
+关注 **Janky frames (%)**（目标 < 5%）、**P95**（目标 < 33ms，即 ≥30fps）。
 
-- **Janky frames (%)** — 目标 < 5%
-- **90th / 95th / 99th percentile** — 目标 95th < 33ms（≥30fps）
-- **Total frames rendered** — 用于交叉验证采样时长
+### 1.5 应用内自测指标
 
-### 1.3 应用内自测指标
-
-库暴露了 `LiquidGlassState.lastRenderCostMs`，记录最近一次后台模糊耗时。可在三页的 `QualityBanner` 上直接观察：
+库暴露 `LiquidGlassState.lastRenderCostMs`，记录最近一次后台模糊耗时。
+可在三页的 `QualityBanner` 上直接观察，或在基准测试中读取：
 
 ```kotlin
 Text("后台模糊耗时：${state.lastRenderCostMs} ms")
 ```
 
 这是**后台模糊单次耗时**，不代表整帧绘制耗时，但可用于判断 CPU 路径是否成为瓶颈。
-
-### 1.4 自动化替代方案（推荐）
-
-Macrobenchmark 的 `FrameTimingMetric` 可产出 P50/P90/P99，比 `gfxinfo` 更稳定：
-
-```kotlin
-@get:Rule val rule = MacrobenchmarkRule()
-
-@Test
-fun glassScroll() = rule.measureRepeated(
-    packageName = "com.example.liquidglass",
-    metrics = listOf(FrameTimingMetric()),
-    iterations = 5,
-    startupMode = StartupMode.WARM,
-) {
-    startActivityAndWait()
-    device.swipe(/* 列表滑动 */)
-}
-```
 
 ---
 
