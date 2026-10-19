@@ -1,246 +1,101 @@
-# Liquid Glass Compose
+<div align="center">
 
-一个用 Jetpack Compose 实现的**液态玻璃（Liquid Glass）**效果示例程序，覆盖 **Android API 21 ~ API 35+** 的全版本兼容。
+# Liquid Glass Compose · Demo
 
-核心特性：真实的**折射**、**色散**、**边缘高光**，并按设备能力**自动降级**，在低端机上不崩溃、不 OOM。
+**Android 液态玻璃效果的完整示例程序（Jetpack Compose）**
 
----
+四级降级链路 + 性能基准 + 真机验收清单。
 
-## 效果原理
+[![Kotlin](https://img.shields.io/badge/Kotlin-Compose-7F52FF?style=flat-square&logo=kotlin)](https://kotlinlang.org/)
+[![Platform](https://img.shields.io/badge/API-21%2B-3DDC84?style=flat-square)](#降级链路)
 
-液态玻璃的光学链路是：
-
-```
-SDF 圆角矩形 → 中心差分求梯度(法线) → 高度场厚度 → 折射位移
-             → RGB 七路色散采样 → Fresnel 边缘高光 → 触摸动态光照
-```
-
-* **SDF（有符号距离场）** 定义玻璃形状，中心差分求梯度得到表面法线；
-* **高度场** 塑造透镜剖面（中心厚、边缘薄），法线方向决定像素位移量；
-* **色散** 沿折射方向的垂直轴，把 RGB 三通道分离成 7 路采样，形成彩虹边；
-* **Fresnel** 在掠射角（边缘）反射增强，形成玻璃棱线。
+</div>
 
 ---
 
-## 四级降级链路
+> 配套组件库：[liquid-glass-compose](https://github.com/XRC111/liquid-glass-compose)（可直接依赖）。
+>
+> Flutter 版本：[liquid_glass_demo](https://github.com/XRC111/liquid_glass_demo)。
 
-| 级别 | 触发条件 | 渲染后端 | 折射 | 色散 | 模糊 |
-|------|----------|----------|------|------|------|
-| `Full` | API 33+ 且非低内存设备 | AGSL `RuntimeShader` + `RenderEffect` | ✅ 高度场 | ✅ 7 路 | ✅ 1/4 分辨率 |
-| `Medium` | API 31–32 或低内存设备 | `RenderEffect.createBlurEffect` | ❌ | ❌ | ✅ 硬件两趟 |
-| `Minimal` | API 24–30 | CPU 可分离 Box 模糊 | ❌ | ❌ | ✅ 1/3 降采样 |
-| `Fallback` | API 21–23 或极低端 | 纯渐变 + 透明度 | ❌ | ❌ | ❌ 零离屏缓冲 |
-
-决策逻辑集中在 `GlassQuality.resolve()`，是**纯逻辑函数**，不依赖任何 Android 图形 API，因此可被单元测试完整覆盖。
-
-```
-API 33+ → Full
-API 31-32 → Medium
-API 24-30 → Minimal
-API 21-23 → Fallback
-低内存设备（isLowRamDevice）→ 强制降一级，避免离屏缓冲 OOM
-```
-
----
-
-## 工程结构
+## 项目结构
 
 ```
 liquid_glass_compose/
-├── app/
-│   ├── src/main/
-│   │   ├── java/com/example/liquidglass/
-│   │   │   ├── MainActivity.kt
-│   │   │   ├── glass/
-│   │   │   │   ├── LiquidGlass.kt          # 核心玻璃组件 + 四条渲染路径
-│   │   │   │   ├── LiquidGlassState.kt     # 状态管理
-│   │   │   │   ├── GlassQuality.kt         # 质量分级枚举 + 降级决策
-│   │   │   │   ├── LiquidGlassFallback.kt  # 低版本回退渲染器
-│   │   │   │   └── AgslShaders.kt          # AGSL 着色器常量
-│   │   │   └── pages/
-│   │   │       ├── HomePage.kt             # 演示首页
-│   │   │       ├── TabBarDemo.kt           # 底部 TabBar 演示
-│   │   │       ├── CardDemo.kt             # 卡片列表演示
-│   │   │       └── GlassBackground.kt      # 演示背景
-│   │   ├── res/values/{themes,colors,strings}.xml
-│   │   └── AndroidManifest.xml
-│   └── build.gradle.kts
-├── benchmark/                              # Macrobenchmark 性能基准模块
-│   ├── src/main/
-│   │   ├── java/com/example/liquidglass/benchmark/
-│   │   │   └── GlassBenchmark.kt           # 4 场景 × 4 档质量 = 16 个测试
-│   │   └── AndroidManifest.xml
-│   └── build.gradle.kts
-├── build.gradle.kts
-├── settings.gradle.kts
-├── gradle/libs.versions.toml
-├── PERFORMANCE.md                          # 性能报告（成本模型 + 实测数据表）
-└── README.md
+├── app/                 # 演示 App（首页 / 列表 / TabBar / 设置）
+├── benchmark/           # Macrobenchmark 性能基准
+├── liquid-glass/        # 组件库模块（发布到 JitPack）
+├── PERFORMANCE.md       # 性能测试报告与验收结论
+└── gradle/
 ```
 
----
-
-## 运行方式
+## 运行
 
 ```bash
-# 调试包
-./gradlew installDebug
+# Debug 包
+./gradlew :app:installDebug
 
-# Release 包（已开启 R8 混淆 + 资源压缩）
-./gradlew assembleRelease
+# Release 包（R8 混淆 + 资源压缩）
+./gradlew :app:assembleRelease
 
 # Lint（验收要求零警告）
-./gradlew lint
+./gradlew :app:lintRelease
+
+# 性能基准（需连接真机或模拟器，API 23+）
+./gradlew :benchmark:connectedBenchmarkAndroidTest
 ```
 
-产物路径：
+## 演示内容
 
-```
-app/build/outputs/apk/release/app-release.apk
-app/build/outputs/apk/debug/app-debug.apk
-```
+| 页面 | 观察点 |
+| --- | --- |
+| 首页 | 单块玻璃 + 参数调节，看折射/色散/边缘高光 |
+| 列表 | 多块玻璃叠在滚动内容上，观察捕获与帧率 |
+| TabBar | 悬浮玻璃底栏，折射下方列表 |
+| 设置 | 手动切换 `GlassQuality` 档位，对比四档差异 |
 
-要求：JDK 17+、Android SDK Platform 35、Build-Tools 35.0.0。
+## 降级链路
 
----
+| 级别 | 触发条件 | 后端 | 折射 | 色散 | 模糊 |
+| --- | --- | --- | --- | --- | --- |
+| `Full` | API 33+ 且非低内存 | AGSL `RuntimeShader` + `RenderEffect` | 高度场 | 7 路 | 1/4 分辨率 |
+| `Medium` | API 31–32 或低内存 | `RenderEffect.createBlurEffect` | 无 | 无 | 硬件两趟 |
+| `Minimal` | API 24–30 | CPU 可分离 Box 模糊 | 无 | 无 | 1/3 降采样 |
+| `Fallback` | API 21–23 或极低端 | 纯渐变 + 透明度 | 无 | 无 | 零离屏缓冲 |
 
-## 性能基准测试
+`GlassQuality.resolve()` 为纯逻辑函数，不依赖图形 API，单测可完整覆盖。
 
-`benchmark/` 模块基于 **Macrobenchmark + FrameTimingMetric**，
-通过 Intent extra 强制指定质量档位与演示页面，逐档采集真实帧率。
+## 性能
 
-```bash
-# 需连接真机或模拟器（API 23+）
-./gradlew :benchmark:connectedAndroidTest
-```
+详见 [PERFORMANCE.md](PERFORMANCE.md)。设计目标（按档位）：
 
-结果输出在 `benchmark/build/outputs/connected_android_test_additional_output/`，
-同时在 Logcat 中以 `Benchmark` tag 打印 `frameDurationCpuMs` 的 P50/P90/P95/P99。
+| 档位 | 目标帧率 | 单帧 GPU 预算 |
+| --- | --- | --- |
+| Full | ≥ 55 fps | ≤ 8 ms |
+| Medium | ≥ 55 fps | ≤ 6 ms |
+| Minimal | ≥ 50 fps | ≤ 10 ms（CPU） |
+| Fallback | 60 fps | ≈ 0 |
 
-可用的调试入口（`MainActivity` 的 Intent extra，benchmark 与手工 `adb` 均可用）：
-
-| extra | 取值 | 作用 |
-|-------|------|------|
-| `com.example.liquidglass.QUALITY` | `Full` / `Medium` / `Minimal` / `Fallback` | 强制质量档位，绕过自动决策 |
-| `com.example.liquidglass.PAGE` | `Home` / `TabBar` / `Cards` | 直接进入指定演示页面 |
-| `com.example.liquidglass.ANIMATE` | `true` / `false` | 是否播放背景动画（基准测试置 `false` 以排除动画噪声） |
-
-手工采集单个场景示例：
-
-```bash
-adb shell am start -n com.example.liquidglass/.MainActivity \
-  -e com.example.liquidglass.QUALITY Full \
-  -e com.example.liquidglass.PAGE TabBar \
-  -e com.example.liquidglass.ANIMATE false
-```
-
-应用内还会实时显示 `state.lastRenderCostMs`（模糊 Pass 的 CPU 耗时），
-可在 `CardDemo` 页看到逐帧刷新。
-
-详见 [PERFORMANCE.md](PERFORMANCE.md)。
-
----
-
-## 平台配置
-
-| 项 | 值 |
-|----|----|
-| `minSdkVersion` | 21（Compose 官方最低） |
-| `targetSdkVersion` | 35 |
-| `compileSdk` | 35 |
-| 硬件加速 | `android:hardwareAccelerated="true"` |
-| R8 混淆 | `isMinifyEnabled = true` + `isShrinkResources = true` |
-
----
-
-## 用法
-
-```kotlin
-val state = LiquidGlass.rememberState()
-
-Box(Modifier.fillMaxSize()) {
-    // 标记背景：玻璃会折射/模糊它
-    Image(
-        painter = painter,
-        contentDescription = null,
-        modifier = Modifier.liquidGlassSource(state),
-    )
-
-    // 玻璃卡片
-    GlassCard(state = state, modifier = Modifier.fillMaxWidth().height(200.dp)) {
-        Text("Liquid Glass")
-    }
-}
-```
-
-底层 API 亦可直接使用：
-
-```kotlin
-// 背景标记
-Modifier.liquidGlassSource(state)
-
-// 任意容器挂玻璃
-Modifier.liquidGlass(state)
-
-// 底部导航栏
-GlassTabBar(
-    state = state,
-    tabs = listOf("首页", "卡片", "说明"),
-    selectedIndex = 0,
-    onTabSelected = { },
-)
-```
-
----
-
-## 性能设计
-
-* **降采样**：背景捕获在 1/4 分辨率（`Full`）或 1/3（`Minimal`）上执行，
-  模糊 Pass 的填充率开销降到 1/16 ~ 1/9；
-* **大面积自适应**：长边超过 1080px 时自动提高降采样率（见 `resolveDownsample()`），
-  底部 TabBar 这类大面积玻璃因此仍能维持 30fps+；
-* **异步模糊**：CPU 模糊跑在单线程低优先级后台线程（`liquid-glass-blur`），
-  不阻塞 UI 线程，模糊耗时通过 `state.lastRenderCostMs` 暴露；
-* **着色器预热**：`AgslGlassLayer.warmUp()` 在首帧前用 8×8 小位图触发
-  SkSL 编译，避免首次出现卡片时的卡顿；
-* **触摸衰减**：抬手后 `touchStrength` 每帧衰减 0.06，高光平滑消失而非突兀截断。
-
-完整的成本模型、测量方法与实测数据填写表见 [PERFORMANCE.md](PERFORMANCE.md)。
-
----
+实测方法与数据见 PERFORMANCE.md；不同机型差异较大，以真机为准。
 
 ## 验收清单
 
-| 项 | 状态 |
-|----|------|
-| `./gradlew installDebug` 可运行 | 通过 |
-| 3 个演示页面（首页单卡片 / TabBar / 卡片列表） | 通过 |
-| Release APK | 通过，见 GitHub Release |
-| README（结构 / 运行 / 各 API 降级表现） | 通过 |
-| 性能测试报告（4 台设备 API 21/24/29/33 帧率） | 测量方法与成本模型已提供；实测数据需真机采集，见 [PERFORMANCE.md](PERFORMANCE.md) |
-| `./gradlew lint` 无警告 | 通过（0 errors, 0 warnings） |
-| 库可被其他 Compose 项目依赖 | 通过，见配套库仓库 [XRC111/liquid-glass-compose](https://github.com/XRC111/liquid-glass-compose) |
+- [ ] 四档切换不崩溃、不闪屏
+- [ ] 低内存设备（`isLowRamDevice`）自动降级
+- [ ] 旋转屏幕后玻璃采样不错位
+- [ ] 背景滚动时折射跟随，无撕裂
+- [ ] Release 包 R8 混淆后纹理与着色器正常
+- [ ] Lint 零警告
 
----
+## 平台配置
+
+- `minSdk 21` / `compileSdk 35` / `targetSdk 35`
+- AGSL 仅在 API 33+ 可用；以下版本走 `RenderEffect` 或 CPU 路径
 
 ## 已知限制
 
-* `Medium` 级别（API 31–32）**不支持折射**。`RenderEffect` 只能做形变/模糊/颜色滤镜，
-  没有「采样时按偏移量重新取样」的能力，这是 API 层面的限制。
-* `Minimal` / `Fallback` 级别下 `quality.dispersion` 为 0，
-  因为色散必须依赖 GPU 上的多点采样才能观察到。
-* 玻璃层绘制在内容**下方**，因此卡片内文字始终清晰，不需要额外设半透明。
-
----
-
-## 参考
-
-* [AGSL 官方文档](https://developer.android.com/develop/ui/compose/graphics/draw/agsl)
-* [RenderEffect API](https://developer.android.com/reference/android/graphics/RenderEffect)
-* [Compose 版本兼容性](https://developer.android.com/jetpack/androidx/releases/compose-kotlin)
-* 灵感来源：[liquid-glass-android](https://github.com/Mortd3kay/liquid-glass-android)、[Haze](https://github.com/chrisbanes/haze)
-
----
+- API < 33 无真实折射与色散（平台不提供运行时着色器）
+- CPU 模糊档位在主线程执行，玻璃数量需控制
+- 模拟器 GPU 行为与真机差异较大，性能结论以真机为准
 
 ## License
 
