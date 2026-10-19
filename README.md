@@ -99,4 +99,4 @@ liquid_glass_compose/
 
 ## License
 
-MIT
+MIT（见 [LICENSE](./LICENSE)）
